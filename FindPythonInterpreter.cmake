@@ -39,6 +39,56 @@ function(find_python_interpreter)
 	endif()
 
 
+
+
+	# Define helper macro to verify found python interpreter
+	set(TEST_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/find_python_interpreter_test_script.py")
+	file(WRITE "${TEST_SCRIPT}" "print('It worked')")
+
+	macro(CHECK_INTERPRETER INTERPRETER_PATH QUIET)
+		# Verify that the version found is the one that is wanted
+		execute_process(
+			COMMAND ${INTERPRETER_PATH} "--version"
+			OUTPUT_VARIABLE INTERPRETER_VERSION
+			ERROR_VARIABLE INTERPRETER_VERSION # Python 2 reports the version on stderr
+		)
+
+		# Remove leading "Python " from version information
+		string(REPLACE "Python " "" INTERPRETER_VERSION "${INTERPRETER_VERSION}")
+		string(STRIP "${INTERPRETER_VERSION}" INTERPRETER_VERSION)
+
+		set(INTERPRETER_OK FALSE)
+		if (INTERPRETER_VERSION VERSION_LESS FIND_PYTHON_INTERPRETER_VERSION)
+			set(MSG "Found Python version ${INTERPRETER_VERSION} at '${INTERPRETER_PATH}' but require at least ${FIND_PYTHON_INTERPRETER_VERSION}")
+		elseif(INTERPRETER_VERSION VERSION_GREATER FIND_PYTHON_INTERPRETER_VERSION AND FIND_PYTHON_INTERPRETER_EXACT)
+			set(MSG "Found Python interpreter version ${INTERPRETER_VERSION}  at '${INTERPRETER_PATH}' but require exactly ${FIND_PYTHON_INTERPRETER_VERSION}")
+		else()
+			set(MSG "Found Python interpreter version ${INTERPRETER_VERSION} at '${INTERPRETER_PATH}'")
+			set(INTERPRETER_OK TRUE)
+		endif()
+
+		if (NOT ${QUIET})
+			message(STATUS "${MSG}")
+		endif()
+
+		if (INTERPRETER_OK)
+			# Check that we can run a simple script from the command line
+			execute_process(
+				COMMAND ${INTERPRETER_PATH} "${TEST_SCRIPT}"
+				OUTPUT_QUIET
+				ERROR_QUIET
+				RESULT_VARIABLE EXIT_CODE
+			)
+
+			if (NOT EXIT_CODE STREQUAL "0")
+				set(INTERPRETER_OK FALSE)
+			endif()
+		endif()
+
+	endmacro()
+
+
+
 	# "parse" version (first append 0.0.0 in case only a part of the version scheme was set by the user)
 	string(CONCAT VERSION_HELPER "${FIND_PYTHON_INTERPRETER_VERSION}" ".0.0.0")
 	string(REPLACE "." ";" VERSION_LIST "${VERSION_HELPER}")
@@ -69,9 +119,33 @@ function(find_python_interpreter)
 		endif()
 	endif()
 
+	# Start by trying to search for a python executable via find_program
+	set(PREV_IGNORE_PATHS ${CMAKE_IGNORE_PATH})
+	foreach (CURRENT_NAME IN LISTS INTERPRETER_NAMES)
+		while (NOT DEFINED PYTHON_INTERPRETER OR PYTHON_INTERPRETER)
+			find_program(PYTHON_INTERPRETER NAMES ${CURRENT_NAME} HINTS ${FIND_PYTHON_INTERPRETER_HINTS})
 
-	# Start by trying to search for a python executable in PATH and HINTS
-	find_program(PYTHON_INTERPRETER NAMES ${INTERPRETER_NAMES} HINTS ${FIND_PYTHON_INTERPRETER_HINTS})
+			if (NOT PYTHON_INTERPRETER)
+				break()
+			endif()
+
+			CHECK_INTERPRETER("${PYTHON_INTERPRETER}" TRUE)
+
+			if (INTERPRETER_OK)
+				break()
+			endif()
+
+			# Skip the just found directory in the next iteration
+			get_filename_component(FOUND_DIR "${PYTHON_INTERPRETER}" DIRECTORY)
+			list(APPEND CMAKE_IGNORE_PATH "${FOUND_DIR}")
+		endwhile()
+
+		if (INTERPRETER_OK)
+			break()
+		endif()
+
+		unset(PYTHON_INTERPRETER)
+	endforeach()
 
 
 	if (NOT PYTHON_INTERPRETER)
@@ -90,28 +164,13 @@ function(find_python_interpreter)
 
 
 	if (PYTHON_INTERPRETER)
-		# Verify that the version found is the one that is wanted
-		execute_process(
-			COMMAND ${PYTHON_INTERPRETER} "--version"
-			OUTPUT_VARIABLE PYTHON_INTERPRETER_VERSION
-			ERROR_VARIABLE PYTHON_INTERPRETER_VERSION # Python 2 reports the version on stderr
-		)
+		CHECK_INTERPRETER("${PYTHON_INTERPRETER}" FALSE)
 
-		# Remove leading "Python " from version information
-		string(REPLACE "Python " "" PYTHON_INTERPRETER_VERSION "${PYTHON_INTERPRETER_VERSION}")
-		string(STRIP "${PYTHON_INTERPRETER_VERSION}" PYTHON_INTERPRETER_VERSION)
-
-
-		if (PYTHON_INTERPRETER_VERSION VERSION_LESS FIND_PYTHON_INTERPRETER_VERSION)
-			message(STATUS "Found Python version ${PYTHON_INTERPRETER_VERSION} but required at least ${FIND_PYTHON_INTERPRETER_VERSION}")
-			set(PYTHON_INTERPRETER "NOTFOUND")
-			set(PYTHON_INTERPRETER_VERSION "NOTFOUND")
-		elseif(PYTHON_INTERPRETER_VERSION VERSION_GREATER FIND_PYTHON_INTERPRETER_VERSION AND FIND_PYTHON_INTERPRETER_EXACT)
-			message(STATUS "Found Python interpreter version ${PYTHON_INTERPRETER_VERSION} but required exactly ${FIND_PYTHON_INTERPRETER_VERSION}")
-			set(PYTHON_INTERPRETER "NOTFOUND")
-			set(PYTHON_INTERPRETER_VERSION "NOTFOUND")
+		if (INTERPRETER_OK)
+			set(PYTHON_INTERPRETER_VERSION "${INTERPRETER_VERSION}")
 		else()
-			message(STATUS "Found Python interpreter version ${PYTHON_INTERPRETER_VERSION}")
+			set(PYTHON_INTERPRETER "NOTFOUND")
+			set(PYTHON_INTERPRETER_VERSION "NOTFOUND")
 		endif()
 	else()
 		set(PYTHON_INTERPRETER_VERSION "NOTFOUND")
