@@ -3,7 +3,7 @@
 # that can be found in the LICENSE file at the root of the
 # source tree.
 
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.5...4.0)
 
 function(find_python_interpreter)
 	set(options REQUIRED EXACT)
